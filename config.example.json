@@ -1,0 +1,11 @@
+{
+    "token": "YOUR_DISCORD_BOT_TOKEN_HERE",
+    "clientId": "YOUR_DISCORD_CLIENT_ID_HERE",
+    "obfuscatorRoleId": "PASTE_ROLE_ID_HERE_OR_LEAVE_EMPTY",
+    "managerRoleId": "PASTE_STAFF_ROLE_ID_HERE_OR_LEAVE_EMPTY",
+    "supportRoleId": "PASTE_SUPPORT_ROLE_ID_HERE_OR_LEAVE_EMPTY",
+    "ticketCategoryId": "PASTE_TICKET_CATEGORY_ID_HERE_OR_LEAVE_EMPTY",
+    "ticketLogChannelId": "PASTE_TICKET_LOG_CHANNEL_ID_HERE_OR_LEAVE_EMPTY",
+    "applicationChannelId": "PASTE_APPLICATION_REVIEW_CHANNEL_ID_HERE_OR_LEAVE_EMPTY",
+    "productName": "UmbraX"
+}

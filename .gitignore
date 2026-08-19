@@ -1,0 +1,41 @@
+# Secrets — never commit the real bot token
+config.json
+
+# Dependencies
+node_modules/
+
+# Logs / scratch
+*.log
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Obfuscator scratch / test artifacts
+*.zip
+output.lua
+*.obf.lua
+obfuscated*.lua
+secured*.lua
+# ...but the checked-in demo under examples/ is intentional, not scratch.
+!examples/obfuscated-demo.lua
+!examples/obfuscated-demo.input.lua
+zinner_*.lua
+zout_raw.lua
+ztmp_*.js
+# Scratch test harnesses (repro/hunt scripts) — prefix with _ to keep them untracked
+test/_*
+
+# Persisted runtime state
+data/
+*.state.json
+
+# Real-Luau test cache
+.luau-cache/
+
+# Optional native-tool binary caches (.minify / .beautify)
+.darklua-cache/
+.luaufmt-cache/

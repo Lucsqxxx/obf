@@ -1,0 +1,35 @@
+# CI — lint + full test sweep on every push / PR.
+#
+# Catches regressions like the executor-hang bug (the anti-tamper
+# task.wait(9e9) bomb) the moment they land, since test:all now exercises
+# the game-present executor path via test/roblox.js.
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # Skips test:realluau — it needs a Luau CLI binary (LUAU_BIN) not
+      # present on the runner. The fengari-based suites in test:all give
+      # full coverage without it.
+      - name: Test
+        run: npm run test:all

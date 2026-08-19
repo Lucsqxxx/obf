@@ -1,0 +1,39 @@
+{
+  "name": "luau-obfuscator-bot",
+  "version": "1.0.0",
+  "description": "Discord bot that obfuscates Luau/Lua code with string encryption",
+  "main": "src/bot/index.js",
+  "scripts": {
+    "start": "node src/bot/index.js",
+    "deploy": "node src/bot/deploy-commands.js",
+    "lint": "eslint .",
+    "test": "node test/run.js",
+    "test:antitamper": "node test/antitamper.js",
+    "test:roblox": "node test/roblox.js",
+    "test:realluau": "node test/luau-real.js",
+    "test:validator": "node test/validator.js",
+    "test:lexer": "node test/lexer.js",
+    "test:beautifier": "node test/beautifier.js",
+    "test:minifier": "node test/minifier.js",
+    "test:bot": "node test/bot.js",
+    "test:idguard": "node test/idguard.js",
+    "test:nativetools": "node test/nativetools.js",
+    "test:check": "node test/check.js",
+    "test:stress": "node test/stress.js",
+    "test:fuzz": "node test/fuzz.js",
+    "test:vm": "node test/vm.js",
+    "test:luau": "node test/luau.js",
+    "test:all": "node test/run.js && node test/validator.js && node test/lexer.js && node test/beautifier.js && node test/minifier.js && node test/bot.js && node test/idguard.js && node test/nativetools.js && node test/antitamper.js && node test/roblox.js && node test/luau-real.js && node test/check.js && node test/stress.js && node test/fuzz.js && node test/vm.js && node test/luau.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "luaparse": "^0.3.1"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.5",
+    "fengari": "^0.1.5"
+  }
+}
