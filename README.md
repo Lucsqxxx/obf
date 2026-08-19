@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ⬛ UmbraX — Luau/Lua Obfuscator Bot
 
 A Discord bot that obfuscates Luau/Lua scripts and wraps them in a
@@ -191,3 +192,6 @@ test/                       All test + harness code
 ---
 
 *Made by Lucsqx.*
+=======
+# obf
+>>>>>>> 42b0dd418785355fb21576103ae3051379f52667
