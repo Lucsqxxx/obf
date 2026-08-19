@@ -34,15 +34,17 @@ function createHelpHandler() {
                 {
                     name:  '🛡️ Moderation (staff)',
                     value: [
-                        '`.clear` `<1-100> [@user]` · `.kick` · `.ban`',
+                        '`.clear` `<1-100> [@user]` · `.kick` · `.ban` · `.unban` `<id>`',
                         '`.timeout` `@user <10m|1h|1d>` · `.warn` `@user`',
                         '`.warnings` `@user` · `.unwarn` `@user [index|all]`',
+                        '`.lock` · `.unlock` — Toggle a channel\'s send permission',
+                        '`.slowmode` `<duration|off>` · `.nick` `@user [name]`',
                     ].join('\n'),
                     inline: false,
                 },
                 {
                     name:  '🔧 Utility',
-                    value: '`.stats` · `.ping` · `.help`',
+                    value: '`.stats` · `.ping` · `.help` · `.serverinfo` · `.userinfo` `[@user]`',
                     inline: false,
                 },
                 {
@@ -64,6 +66,7 @@ function createHelpHandler() {
             embed.addFields({
                 name:  '```🛠️ Management (staff)```',
                 value: [
+                    '> `.say` `<message>` — Post plain text as the bot',
                     '> `.update` `<version> [#channel] [noping]` `<changelog…>` — Post an update announcement',
                     '> `.embed` `<key: value…>` — Build/edit an embed (`channel:` `edit:` `timestamp:`)',
                     '> `.ticket setup` — Post the support-ticket panel',

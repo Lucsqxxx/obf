@@ -1,12 +1,12 @@
 // ═══════════════════════════════════════════════════════════════
 //  UmbraX — Community moderation commands
 //
-//  Staff tools for the community server: .clear/.purge, .kick, .ban,
-//  .timeout/.mute, .warn, .warnings, .unwarn. Each command is gated by
-//  the invoker's Discord permissions (not the obfuscator role) and
-//  re-checks the bot's own permissions + role hierarchy before acting,
-//  so a missing permission produces a clean message instead of an
-//  unhandled reject. Targets are DM'd the action + reason (best-effort).
+//  Staff tools for the community server: .clear/.purge, .kick, .ban, .unban,
+//  .timeout/.mute, .warn, .warnings, .unwarn, .lock/.unlock, .slowmode, .nick.
+//  Each command is gated by the invoker's Discord permissions (not the
+//  obfuscator role) and re-checks the bot's own permissions + role hierarchy
+//  before acting, so a missing permission produces a clean message instead
+//  of an unhandled reject. Targets are DM'd the action + reason (best-effort).
 //
 //  Warnings are PERSISTED in the store (data/state.json), keyed by
 //  guild+user, so they survive restarts. Reaching a threshold
@@ -23,6 +23,8 @@ const P = PermissionsBitField.Flags;
 
 // Discord caps timeouts at 28 days.
 const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
+// Discord caps slowmode at 6 hours.
+const MAX_SLOWMODE_S = 21600;
 
 // Auto-escalation: when a user's total warning count reaches a threshold, apply
 // the paired timeout automatically. Checked high-to-low so the harshest
@@ -116,9 +118,25 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
             const fetched = await message.channel.messages.fetch({ limit: 100 }).catch(() => null);
             if (!fetched) return message.channel.send({ embeds: [err('Clear Failed', 'Could not read channel history.')] });
             const mine = [...fetched.values()].filter(m => m.author.id === filterMember.id).slice(0, count);
-            const deleted = await message.channel.bulkDelete(mine, true).catch(() => null);
-            removed = deleted ? deleted.size : 0;
+
+            if (mine.length === 0) {
+                await message.delete().catch(() => {});
+                return message.channel.send({ embeds: [err('Nothing Cleared', `**${filterMember.user.tag}** has no recent deletable messages here (last 100, within 14 days).`)] });
+            }
+            // Discord's bulkDelete requires 2-100 messages; a single match must
+            // be deleted directly, or the API throws and the catch(() => null)
+            // silently reported success with 0 messages removed.
+            if (mine.length === 1) {
+                removed = await mine[0].delete().then(() => 1).catch(() => 0);
+            } else {
+                const deleted = await message.channel.bulkDelete(mine, true).catch(() => null);
+                removed = deleted ? deleted.size : 0;
+            }
             await message.delete().catch(() => {});
+
+            if (removed === 0) {
+                return message.channel.send({ embeds: [err('Clear Failed', `Couldn't delete **${filterMember.user.tag}**'s messages — they may be older than **14 days**.`)] });
+            }
         } else {
             // Delete `count` messages PLUS the command message itself, but never
             // ask Discord for more than 100 in one bulkDelete (its hard cap — a
@@ -183,6 +201,27 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
         const done = await target.ban({ reason: `${message.author.tag}: ${reason}` }).then(() => true).catch(() => false);
         if (!done) return message.reply({ embeds: [err('Ban Failed', 'Something went wrong banning that member.')] });
         return message.reply({ embeds: [ok('`🔨` Member Banned', `**${target.user.tag}** was banned.\n> **Reason:** ${reason}`, C.error)] });
+    }
+
+    // ── .unban <id> [reason] ─────────────────────────────────────
+    // Targets aren't guild members anymore, so this resolves by raw ID only.
+    async function unban(message, args) {
+        const bad = precheck(message, P.BanMembers, 'Ban Members');
+        if (bad) return message.reply({ embeds: [bad] });
+
+        const idRaw = (args[0] || '').replace(/[<@!>]/g, '');
+        if (!/^\d{16,20}$/.test(idRaw)) {
+            return message.reply({ embeds: [err('Invalid ID', 'Provide the user ID to unban (mentions won\'t resolve — they\'re not in the server). Usage: `.unban <id> [reason]`')] });
+        }
+
+        const bans = await message.guild.bans.fetch().catch(() => null);
+        if (!bans) return message.reply({ embeds: [err('Unban Failed', 'Could not read the ban list.')] });
+        if (!bans.has(idRaw)) return message.reply({ embeds: [err('Not Banned', 'That user is not currently banned here.')] });
+
+        const reason = args.slice(1).join(' ') || 'No reason provided';
+        const done = await message.guild.members.unban(idRaw, `${message.author.tag}: ${reason}`).then(() => true).catch(() => false);
+        if (!done) return message.reply({ embeds: [err('Unban Failed', 'Something went wrong unbanning that user.')] });
+        return message.reply({ embeds: [ok('`🔓` Member Unbanned', `<@${idRaw}> was unbanned.\n> **Reason:** ${reason}`, C.success)] });
     }
 
     // ── .timeout / .mute <@user|id> <duration> [reason] ──────────
@@ -299,7 +338,85 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
         return message.reply({ embeds: [ok('`🧽` Warning Removed', `Removed warning \`#${idx}\` from **${target.user.tag}**.\n> **Remaining:** ${left}`, C.success)] });
     }
 
-    return { clear, kick, ban, timeout, warn, warnings, unwarn };
+    // ── .lock [reason] ────────────────────────────────────────────
+    // Denies @everyone SendMessages in the current channel.
+    async function lock(message, args) {
+        const bad = precheck(message, P.ManageChannels, 'Manage Channels');
+        if (bad) return message.reply({ embeds: [bad] });
+
+        const channel = message.channel;
+        const reason = args.join(' ') || 'No reason provided';
+        const done = await channel.permissionOverwrites
+            .edit(message.guild.roles.everyone, { SendMessages: false }, { reason: `${message.author.tag}: ${reason}` })
+            .then(() => true).catch(() => false);
+        if (!done) return message.reply({ embeds: [err('Lock Failed', 'I couldn\'t update this channel\'s permissions.')] });
+        return message.reply({ embeds: [ok('`🔒` Channel Locked', `${channel} is now locked — only staff can send messages.\n> **Reason:** ${reason}`, C.warn)] });
+    }
+
+    // ── .unlock ───────────────────────────────────────────────────
+    // Resets @everyone's SendMessages overwrite (removes the deny, not force-allow).
+    async function unlock(message) {
+        const bad = precheck(message, P.ManageChannels, 'Manage Channels');
+        if (bad) return message.reply({ embeds: [bad] });
+
+        const channel = message.channel;
+        const done = await channel.permissionOverwrites
+            .edit(message.guild.roles.everyone, { SendMessages: null }, { reason: `${message.author.tag}: unlock` })
+            .then(() => true).catch(() => false);
+        if (!done) return message.reply({ embeds: [err('Unlock Failed', 'I couldn\'t update this channel\'s permissions.')] });
+        return message.reply({ embeds: [ok('`🔓` Channel Unlocked', `${channel} is unlocked.`, C.success)] });
+    }
+
+    // ── .slowmode <duration|off> ─────────────────────────────────
+    // Accepts a compact duration (10s/5m/1h) or a raw second count; `off`/`0`
+    // disables it. Capped at Discord's 6-hour maximum.
+    async function slowmode(message, args) {
+        const bad = precheck(message, P.ManageChannels, 'Manage Channels');
+        if (bad) return message.reply({ embeds: [bad] });
+
+        const token = (args[0] || '').toLowerCase();
+        if (token === 'off' || token === '0') {
+            await message.channel.setRateLimitPerUser(0).catch(() => {});
+            return message.reply({ embeds: [ok('`🐌` Slowmode Disabled', `${message.channel} slowmode turned off.`, C.success)] });
+        }
+
+        const asDuration = parseDuration(token);
+        const seconds = asDuration ? Math.round(asDuration / 1000) : parseInt(token, 10);
+        if (!Number.isInteger(seconds) || seconds < 1 || seconds > MAX_SLOWMODE_S) {
+            return message.reply({ embeds: [err('Invalid Duration', `Use seconds (1-${MAX_SLOWMODE_S}) or a duration like \`10s\`/\`5m\`/\`1h\`. Usage: \`.slowmode <duration|off>\``)] });
+        }
+
+        const done = await message.channel.setRateLimitPerUser(seconds).then(() => true).catch(() => false);
+        if (!done) return message.reply({ embeds: [err('Slowmode Failed', 'I couldn\'t update this channel\'s slowmode.')] });
+        return message.reply({ embeds: [ok('`🐌` Slowmode Set', `${message.channel} slowmode is now **${seconds}s**.`, C.info)] });
+    }
+
+    // ── .nick <@user|id> [new nickname] ──────────────────────────
+    // Omit the nickname to reset it back to their username.
+    async function nickname(message, args) {
+        const bad = precheck(message, P.ManageNicknames, 'Manage Nicknames');
+        if (bad) return message.reply({ embeds: [bad] });
+
+        const target = await resolveTarget(message, args);
+        if (!target) return message.reply({ embeds: [err('Not Found', 'Mention a member or provide their ID. Usage: `.nick @user [new nickname]`')] });
+
+        const block = canActOn(message, target, 'change the nickname of');
+        if (block) return message.reply({ embeds: [block] });
+
+        const newNick = args.slice(1).join(' ').trim().slice(0, 32) || null; // null resets
+        const done = await target.setNickname(newNick, `${message.author.tag}: nickname change`).then(() => true).catch(() => false);
+        if (!done) return message.reply({ embeds: [err('Nickname Failed', 'I couldn\'t change that member\'s nickname — check role hierarchy.')] });
+        return message.reply({
+            embeds: [ok('`✏️` Nickname Updated',
+                newNick ? `**${target.user.tag}**'s nickname is now **${newNick}**.` : `**${target.user.tag}**'s nickname was reset.`,
+                C.success)],
+        });
+    }
+
+    return {
+        clear, kick, ban, unban, timeout, warn, warnings, unwarn,
+        lock, unlock, slowmode, nickname,
+    };
 }
 
 module.exports = createModerationHandlers;

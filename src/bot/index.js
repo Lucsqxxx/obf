@@ -42,6 +42,9 @@ const createTicketHandlers   = require('./commands/ticket');
 const createGiveawayHandlers = require('./commands/giveaway');
 const createApplicationHandlers = require('./commands/application');
 const createInteractiveBuilder = require('./commands/embedbuilder');
+const createServerInfoHandler = require('./commands/serverinfo');
+const createUserInfoHandler   = require('./commands/userinfo');
+const createSayHandler        = require('./commands/say');
 
 // ── Services ─────────────────────────────────────────────────────
 const client      = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers] });
@@ -94,18 +97,29 @@ const commands = new Map([
     ['secure',    createSecureHandler(secureDeps)],
     ['upload',    createUploadHandler({ usageStats, store })],
     ['stats',     createStatsHandler({ usageStats, store, startTime })],
+    // ── Utility (open to everyone) ──
+    ['serverinfo', createServerInfoHandler()],
+    ['userinfo',   createUserInfoHandler()],
+    ['whois',      createUserInfoHandler()],
     // ── Community moderation (gated by Discord permissions per-command) ──
     ['clear',     moderation.clear],
     ['purge',     moderation.clear],
     ['kick',      moderation.kick],
     ['ban',       moderation.ban],
+    ['unban',     moderation.unban],
     ['timeout',   moderation.timeout],
     ['mute',      moderation.timeout],
     ['warn',      moderation.warn],
     ['warnings',  moderation.warnings],
     ['warns',     moderation.warnings],
     ['unwarn',    moderation.unwarn],
+    ['lock',      moderation.lock],
+    ['unlock',    moderation.unlock],
+    ['slowmode',  moderation.slowmode],
+    ['nick',      moderation.nickname],
+    ['nickname',  moderation.nickname],
     // ── Staff management (gated by the manager role; hidden from .help/.panel) ──
+    ['say',       createSayHandler()],
     ['update',    createUpdateHandler({ builder })],
     ['embed',     createEmbedHandler({ builder })],
     ['ticket',    tickets.ticket],
@@ -120,7 +134,7 @@ const OBFUSCATOR_COMMANDS = new Set(['obfuscate', 'secure', 'upload', 'encrypt',
 
 // Staff-only management commands. Gated by the manager role (config.managerRoleId)
 // and hidden from .help/.panel unless the invoker has staff access.
-const STAFF_COMMANDS = new Set(['update', 'embed', 'ticket', 'giveaway', 'gw', 'application']);
+const STAFF_COMMANDS = new Set(['update', 'embed', 'ticket', 'giveaway', 'gw', 'application', 'say']);
 
 // ── Lifecycle ────────────────────────────────────────────────────
 client.once('ready', () => {

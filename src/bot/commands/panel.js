@@ -44,6 +44,11 @@ function createPanelHandler() {
                     value: '`--cff` `--split` `--deep` `--indirect` `--pool`',
                     inline: false,
                 },
+                {
+                    name:  '🔧 Utility',
+                    value: '`.serverinfo` · `.userinfo` `[@user]` · `.stats` · `.ping`',
+                    inline: false,
+                },
             )
             .setFooter({ text: `${FOOTER.text} • .help for full details` })
             .setTimestamp();
@@ -53,11 +58,13 @@ function createPanelHandler() {
             embed.addFields({
                 name:  '🛠️ Management (staff)',
                 value: [
+                    '`.say` — Post plain text as the bot',
                     '`.update` — Post an update announcement',
                     '`.embed` — Build a custom embed',
                     '`.ticket setup` — Support-ticket panel',
                     '`.giveaway start` — Run a giveaway',
                     '`.application panel` — Staff-application panel',
+                    '`.lock` / `.unlock` / `.slowmode` — Channel controls',
                 ].join('\n'),
                 inline: false,
             });
