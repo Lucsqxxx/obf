@@ -123,7 +123,8 @@ function createSecureHandler(deps) {
                 addJunkCode:     true,
                 encodeNumbers:   true,
                 minStringLength: 1,
-                watermark:       true,
+                // Off by default — see the same note in obfuscate.js.
+                watermark:       false,
                 ...layers,
             });
             const stats   = transformer.getStats();

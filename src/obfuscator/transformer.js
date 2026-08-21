@@ -90,7 +90,7 @@ class LuaTransformer {
             indirectGlobals = false, // route executor/Roblox globals through aliases
             stringPool = false,      // hoist encrypted strings into one shuffled table
             minStringLength = 1,
-            watermark = true,
+            watermark = false,
             seed = null,             // set a number to make this build reproducible
         } = options;
 

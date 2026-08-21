@@ -62,7 +62,10 @@ function createObfuscateHandler(deps) {
                 addJunkCode:     true,
                 encodeNumbers:   true,
                 minStringLength: 1,
-                watermark:       true,
+                // Off by default — the watermark used to embed the literal
+                // string "obfuscated by UmbraX" in every build, a free
+                // fingerprint for anyone scanning for this tool's output.
+                watermark:       false,
                 ...layers,
             });
             stats = transformer.getStats();

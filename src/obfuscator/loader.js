@@ -124,12 +124,30 @@ function encode(script) {
     const posByIdx = new Array(real.length);
     arr.forEach((c, pos) => { if (c.isReal) posByIdx[c.idx] = pos + 1; });
 
+    // Mask the mapping with its own per-build xorshift keystream before it's
+    // emitted. Previously this array was written to the loader as PLAIN
+    // integers — i.e. the exact, ordered list of which shuffled/decoy-padded
+    // array positions are the real chunks, in cleartext, right next to the
+    // chunk array itself. The shuffle+decoys therefore added size and defeated
+    // manual eyeballing, but gave an automated reader zero extra work: the
+    // resolution the whole scheme depends on was sitting right there. Masking
+    // it means recovering the real positions needs the same xorshift step the
+    // per-chunk cipher already uses (see build()'s unmask loop / _twinDecode
+    // below) — a small, deliberate step instead of a direct read.
+    const mapSeed = randInt(1, 0x7FFFFFFF);
+    let mst = mapSeed >>> 0;
+    const maskedMapping = posByIdx.map((pos) => {
+        mst = xs32(mst);
+        return pos ^ (mst & 0xFF);
+    });
+
     return {
         alphabet,
         xorKey,
         globalSeed,
+        mapSeed,
         chunks: arr.map(c => c.data),
-        mapping: posByIdx,
+        mapping: maskedMapping,
         payloadHash,
         payloadHashSeed,
     };
@@ -138,9 +156,15 @@ function encode(script) {
 /**
  * Build the full Lua loader source for `script`.
  * @param script    inner Lua source (already obfuscated)
- * @param watermark whether to prepend a comment watermark
+ * @param watermark whether to prepend a comment watermark. Defaults to
+ *        false: the previous default (true) embedded the literal string
+ *        "obfuscated by UmbraX" in every build — a free, zero-effort
+ *        fingerprint any static scanner could grep for. When explicitly
+ *        enabled, the comment now carries only the per-build hex tag
+ *        (no product name), which still lets a build be identified/traced
+ *        by whoever generated it without self-identifying the tool used.
  */
-function build(script, watermark = true) {
+function build(script, watermark = false) {
     const E = encode(script);
 
     // ── polymorphic name set ─────────────────────────────────────
@@ -151,6 +175,7 @@ function build(script, watermark = true) {
         sn: rname(), fs: rname(), fails: rname(),
         idx64: rname(), alpha: rname(), dec: rname(),
         inp: rname(), map: rname(), gseed: rname(), xk: rname(),
+        mapseed: rname(),
         ok: rname(), fn: rname(), res: rname(),
     };
     const encStr = (s) => s.split('').map(c => `${v.sc}(${c.charCodeAt(0)})`).join('..');
@@ -162,7 +187,7 @@ function build(script, watermark = true) {
     // probes failing → floor 4 → 4*mul) plus xorKey stays a positive int < 2^31.
     const keyGateMul = randInt(0x10000, 0x400000);
     const wmHash = randInt(0, 0xFFFFFFFF).toString(16);
-    const wm = watermark ? `--[[ obfuscated by UmbraX | ${wmHash} ]] ` : '';
+    const wm = watermark ? `--[[ ${wmHash} ]] ` : '';
 
     L.push(wm + `return(function(_E,_U,_S,...)`);
 
@@ -217,10 +242,22 @@ function build(script, watermark = true) {
     L.push(`return ${v.cc}(o)`);
     L.push(`end`);
 
-    // data + mapping
+    // data + mapping (mapping ships MASKED — see encode()'s comment above;
+    // it's unmasked below via the same xorshift step the per-chunk decoder
+    // already uses, so no new primitive is introduced).
     L.push(`${v.inp}={${E.chunks.map(c => `[=[${c}]=]`).join(',')}}`);
     L.push(`${v.map}={${E.mapping.join(',')}}`);
+    L.push(`${v.mapseed}=${E.mapSeed}`);
     L.push(`${v.gseed}=${E.globalSeed}`);
+
+    // unmask the chunk-resolution map in place
+    L.push(`do local _ms=${v.mapseed}`);
+    L.push(`for _t=1,#${v.map} do`);
+    L.push(`_ms=${v.bnd}(${v.bx}(_ms,${v.bls}(_ms,13)),0xFFFFFFFF)`);
+    L.push(`_ms=${v.bx}(_ms,${v.brs}(_ms,17))`);
+    L.push(`_ms=${v.bnd}(${v.bx}(_ms,${v.bls}(_ms,5)),0xFFFFFFFF)`);
+    L.push(`${v.map}[_t]=${v.bx}(${v.map}[_t],${v.bnd}(_ms,0xFF))`);
+    L.push(`end end`);
 
     // reconstruct layer A bytes
     L.push(`local _parts={}`);
@@ -299,7 +336,7 @@ function build(script, watermark = true) {
     L.push(`local _ok2,_res=${v.p}(${v.fn},...)`);
     L.push(`if not _ok2 then _E.error(${v.stR}(_res)) end`);
     L.push(`return _res`);
-    L.push(`else _E.error("UmbraX: load failed") end`);
+    L.push(`else _E.error("load failed") end`);
 
     L.push(`end)(getfenv and getfenv() or _ENV,unpack or table.unpack,select,...)`);
 
@@ -328,10 +365,19 @@ function _b64decToBytes(s, alpha) {
     return out;
 }
 function _twinDecode(E) {
+    // Unmask the chunk-resolution map — the twin of the Lua unmask loop in
+    // build(). E.mapping ships masked (see encode()); this recovers the real
+    // 1-based array positions before they're used to pull chunks out of order.
+    let mst = E.mapSeed >>> 0;
+    const mapping = E.mapping.map((masked) => {
+        mst = xs32(mst);
+        return masked ^ (mst & 0xFF);
+    });
+
     // reconstruct layer A
     const parts = [];
-    for (let t = 1; t <= E.mapping.length; t++) {
-        const pos = E.mapping[t - 1];
+    for (let t = 1; t <= mapping.length; t++) {
+        const pos = mapping[t - 1];
         const data = E.chunks[pos - 1];
         const encBytes = _b64decToBytes(data, E.alphabet);
         let st = (E.globalSeed ^ (t - 1)) >>> 0;
