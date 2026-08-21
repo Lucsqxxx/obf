@@ -1,5 +1,5 @@
-<<<<<<< HEAD
-# ⬛ UmbraX — Luau/Lua Obfuscator Bot
+
+# A obfuscator
 
 A Discord bot that obfuscates Luau/Lua scripts and wraps them in a
 self-decrypting, anti-tampered loader. Token-based pipeline (string
