@@ -109,6 +109,7 @@ const commands = new Map([
     ['unban',     moderation.unban],
     ['timeout',   moderation.timeout],
     ['mute',      moderation.timeout],
+    ['unmute',    moderation.unmute],
     ['warn',      moderation.warn],
     ['warnings',  moderation.warnings],
     ['warns',     moderation.warnings],
@@ -146,6 +147,14 @@ client.once('ready', () => {
     });
     // Re-arm giveaway end-timers that were running before this restart.
     try { giveaways.rehydrate(); } catch (err) { console.warn('[UmbraX] giveaway rehydrate failed:', err.message); }
+
+    // Periodically prune ended giveaways older than a day. rehydrate() only
+    // does this at boot, so a long-running process without a restart would
+    // otherwise let state.json grow unbounded with finished giveaways.
+    const pruneTimer = setInterval(() => {
+        try { giveaways.pruneEndedGiveaways(); } catch (err) { console.warn('[UmbraX] giveaway prune failed:', err.message); }
+    }, 6 * 60 * 60 * 1000); // every 6h
+    if (pruneTimer.unref) pruneTimer.unref();
 });
 
 client.on('messageCreate', async message => {

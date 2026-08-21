@@ -181,6 +181,15 @@ function reconstructInline(message, args) {
     return args && args.length ? args.join(' ') : '';
 }
 
+// Best-effort: mirror a moderation/management action to the configured
+// mod-log channel (config.modLogChannelId). No-op if unset or unreachable —
+// this is an audit convenience, never something a command should fail over.
+async function sendModLog(client, config, embed) {
+    if (!config?.modLogChannelId) return;
+    const channel = await client.channels.fetch(config.modLogChannelId).catch(() => null);
+    if (channel && typeof channel.send === 'function') await channel.send({ embeds: [embed] }).catch(() => {});
+}
+
 // A standard red error embed.
 function errorEmbed(title, desc) {
     return new EmbedBuilder()
@@ -253,5 +262,5 @@ module.exports = {
     parseLayerFlags, formatBytes, bar, protectionLevel, uptime,
     parseDuration, humanizeDuration, parseColor, isHttpUrl, NAMED_COLORS,
     fetchSource, errorEmbed, hasObfuscatorAccess, accessDeniedEmbed,
-    hasStaffAccess, staffAccessDeniedEmbed,
+    hasStaffAccess, staffAccessDeniedEmbed, sendModLog,
 };

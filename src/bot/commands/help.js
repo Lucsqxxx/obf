@@ -35,7 +35,7 @@ function createHelpHandler() {
                     name:  '🛡️ Moderation (staff)',
                     value: [
                         '`.clear` `<1-100> [@user]` · `.kick` · `.ban` · `.unban` `<id>`',
-                        '`.timeout` `@user <10m|1h|1d>` · `.warn` `@user`',
+                        '`.timeout` `@user <10m|1h|1d>` · `.unmute` `@user` · `.warn` `@user`',
                         '`.warnings` `@user` · `.unwarn` `@user [index|all]`',
                         '`.lock` · `.unlock` — Toggle a channel\'s send permission',
                         '`.slowmode` `<duration|off>` · `.nick` `@user [name]`',

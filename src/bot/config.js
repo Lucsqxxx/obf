@@ -58,6 +58,12 @@ const ticketLogChannelId = process.env.TICKET_LOG_CHANNEL_ID || fileConfig.ticke
 // there is nowhere for submissions to go, so the panel refuses to post.
 const applicationChannelId = process.env.APPLICATION_CHANNEL_ID || fileConfig.applicationChannelId || '';
 
+// Channel (optional) that moderation actions (kick/ban/unban/timeout/warn/
+// unwarn/lock/unlock/slowmode/nick) and staff-management posts (.say/.embed/
+// .update) are mirrored to as an audit trail. If left empty, no log is kept
+// beyond Discord's own audit log and the in-channel confirmation.
+const modLogChannelId = process.env.MOD_LOG_CHANNEL_ID || fileConfig.modLogChannelId || '';
+
 // Product name shown in the .update announcement ("<product> has been updated").
 const productName = process.env.PRODUCT_NAME || fileConfig.productName || 'UmbraX';
 
@@ -82,5 +88,5 @@ if (!fromEnv && process.env.NODE_ENV === 'production') {
 module.exports = {
     token, clientId, fromEnv, obfuscatorRoleId,
     managerRoleId, ticketCategoryId, supportRoleId, ticketLogChannelId,
-    applicationChannelId, productName,
+    applicationChannelId, modLogChannelId, productName,
 };

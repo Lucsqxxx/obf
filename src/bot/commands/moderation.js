@@ -2,11 +2,16 @@
 //  UmbraX — Community moderation commands
 //
 //  Staff tools for the community server: .clear/.purge, .kick, .ban, .unban,
-//  .timeout/.mute, .warn, .warnings, .unwarn, .lock/.unlock, .slowmode, .nick.
-//  Each command is gated by the invoker's Discord permissions (not the
-//  obfuscator role) and re-checks the bot's own permissions + role hierarchy
-//  before acting, so a missing permission produces a clean message instead
-//  of an unhandled reject. Targets are DM'd the action + reason (best-effort).
+//  .timeout/.mute, .unmute, .warn, .warnings, .unwarn, .lock/.unlock,
+//  .slowmode, .nick. Each command is gated by the invoker's Discord
+//  permissions (not the obfuscator role) and re-checks the bot's own
+//  permissions + role hierarchy before acting, so a missing permission
+//  produces a clean message instead of an unhandled reject. Targets are
+//  DM'd the action + reason (best-effort).
+//
+//  Every action except .clear/.purge (too high-volume to be useful as an
+//  audit trail, and Discord's own audit log already covers bulk deletes)
+//  is mirrored to config.modLogChannelId, if set, via helpers.sendModLog.
 //
 //  Warnings are PERSISTED in the store (data/state.json), keyed by
 //  guild+user, so they survive restarts. Reaching a threshold
@@ -17,7 +22,8 @@
 'use strict';
 
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
-const { parseDuration, humanizeDuration } = require('../helpers');
+const { parseDuration, humanizeDuration, sendModLog } = require('../helpers');
+const config = require('../config');
 
 const P = PermissionsBitField.Flags;
 
@@ -55,6 +61,23 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
             .setFooter(FOOTER)
             .setTimestamp();
         await target.send({ embeds: [dm] }).catch(() => {});
+    }
+
+    // Mirror an action to the mod-log channel (best-effort, no-op if unset).
+    async function logAction(message, title, summary, reason, color) {
+        const embed = new EmbedBuilder()
+            .setColor(color)
+            .setAuthor({ name: BRAND })
+            .setTitle(title)
+            .setDescription([
+                summary,
+                `> **By:** ${message.author} (\`${message.author.id}\`)`,
+                `> **In:** ${message.channel}`,
+                `> **Reason:** ${reason || 'No reason provided'}`,
+            ].join('\n'))
+            .setFooter(FOOTER)
+            .setTimestamp();
+        await sendModLog(message.client, config, embed);
     }
 
     // Guard shared by every command: must be in a guild, invoker must hold
@@ -100,6 +123,8 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
     }
 
     // ── .clear / .purge <count> [@user] ──────────────────────────
+    // Deliberately NOT mirrored to the mod-log — bulk deletes are frequent
+    // and low-stakes, and Discord's own audit log already records them.
     async function clear(message, args) {
         const bad = precheck(message, P.ManageMessages, 'Manage Messages');
         if (bad) return message.reply({ embeds: [bad] });
@@ -181,6 +206,7 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
         await notifyTarget(target, message.guild.name, 'kicked', reason, C.orange);
         const done = await target.kick(`${message.author.tag}: ${reason}`).then(() => true).catch(() => false);
         if (!done) return message.reply({ embeds: [err('Kick Failed', 'Something went wrong kicking that member.')] });
+        await logAction(message, '`👢` Member Kicked', `**${target.user.tag}** (\`${target.id}\`) was kicked.`, reason, C.orange);
         return message.reply({ embeds: [ok('`👢` Member Kicked', `**${target.user.tag}** was kicked.\n> **Reason:** ${reason}`, C.orange)] });
     }
 
@@ -200,6 +226,7 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
         await notifyTarget(target, message.guild.name, 'banned', reason, C.error);
         const done = await target.ban({ reason: `${message.author.tag}: ${reason}` }).then(() => true).catch(() => false);
         if (!done) return message.reply({ embeds: [err('Ban Failed', 'Something went wrong banning that member.')] });
+        await logAction(message, '`🔨` Member Banned', `**${target.user.tag}** (\`${target.id}\`) was banned.`, reason, C.error);
         return message.reply({ embeds: [ok('`🔨` Member Banned', `**${target.user.tag}** was banned.\n> **Reason:** ${reason}`, C.error)] });
     }
 
@@ -221,6 +248,7 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
         const reason = args.slice(1).join(' ') || 'No reason provided';
         const done = await message.guild.members.unban(idRaw, `${message.author.tag}: ${reason}`).then(() => true).catch(() => false);
         if (!done) return message.reply({ embeds: [err('Unban Failed', 'Something went wrong unbanning that user.')] });
+        await logAction(message, '`🔓` Member Unbanned', `<@${idRaw}> (\`${idRaw}\`) was unbanned.`, reason, C.success);
         return message.reply({ embeds: [ok('`🔓` Member Unbanned', `<@${idRaw}> was unbanned.\n> **Reason:** ${reason}`, C.success)] });
     }
 
@@ -246,7 +274,32 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
         if (!done) return message.reply({ embeds: [err('Timeout Failed', 'Something went wrong timing out that member.')] });
         await notifyTarget(target, message.guild.name, `timed out for ${human}`, reason, C.warn,
             [{ name: 'Duration', value: human, inline: true }]);
+        await logAction(message, '`🔇` Member Timed Out', `**${target.user.tag}** (\`${target.id}\`) timed out for **${human}**.`, reason, C.warn);
         return message.reply({ embeds: [ok('`🔇` Member Timed Out', `**${target.user.tag}** was timed out for **${human}**.\n> **Reason:** ${reason}`, C.warn)] });
+    }
+
+    // ── .unmute <@user|id> [reason] ───────────────────────────────
+    // Manually clears an active timeout early (Discord only auto-expires it).
+    async function unmute(message, args) {
+        const bad = precheck(message, P.ModerateMembers, 'Timeout Members');
+        if (bad) return message.reply({ embeds: [bad] });
+
+        const target = await resolveTarget(message, args);
+        if (!target) return message.reply({ embeds: [err('Not Found', 'Mention a member or provide their ID. Usage: `.unmute @user [reason]`')] });
+
+        if (!target.communicationDisabledUntilTimestamp || target.communicationDisabledUntilTimestamp < Date.now()) {
+            return message.reply({ embeds: [err('Not Timed Out', `**${target.user.tag}** isn\'t currently timed out.`)] });
+        }
+
+        const block = canActOn(message, target, 'un-timeout');
+        if (block) return message.reply({ embeds: [block] });
+
+        const reason = args.slice(1).join(' ') || 'No reason provided';
+        const done = await target.timeout(null, `${message.author.tag}: ${reason}`).then(() => true).catch(() => false);
+        if (!done) return message.reply({ embeds: [err('Unmute Failed', 'Something went wrong removing that timeout.')] });
+        await notifyTarget(target, message.guild.name, 'un-timed-out', reason, C.success);
+        await logAction(message, '`🔊` Timeout Removed', `**${target.user.tag}** (\`${target.id}\`)'s timeout was removed early.`, reason, C.success);
+        return message.reply({ embeds: [ok('`🔊` Timeout Removed', `**${target.user.tag}**'s timeout was removed.\n> **Reason:** ${reason}`, C.success)] });
     }
 
     // ── .warn <@user|id> [reason] ────────────────────────────────
@@ -283,6 +336,9 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
             `> **Total warnings:** ${count}`,
         ];
         if (escalation) lines.push(`> **Auto-timeout:** ${escalation} (reached ${count} warnings)`);
+        await logAction(message, '`⚠️` Member Warned',
+            `**${target.user.tag}** (\`${target.id}\`) warned — total **${count}**${escalation ? `, auto-timeout **${escalation}**` : ''}.`,
+            reason, C.warn);
         return message.reply({ embeds: [ok('`⚠️` Member Warned', lines.join('\n'), C.warn)] });
     }
 
@@ -325,6 +381,7 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
         if (token === 'all') {
             const n = store.clearWarnings(message.guild.id, target.id);
             if (!n) return message.reply({ embeds: [err('No Warnings', `**${target.user.tag}** had no warnings to clear.`)] });
+            await logAction(message, '`🧽` Warnings Cleared', `Removed all **${n}** warning(s) from **${target.user.tag}** (\`${target.id}\`).`, null, C.success);
             return message.reply({ embeds: [ok('`🧽` Warnings Cleared', `Removed all **${n}** warning${n === 1 ? '' : 's'} from **${target.user.tag}**.`, C.success)] });
         }
 
@@ -335,6 +392,7 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
         const removed = store.removeWarning(message.guild.id, target.id, idx);
         if (!removed) return message.reply({ embeds: [err('Not Found', `There's no warning \`#${idx}\` for **${target.user.tag}**. See \`.warnings @user\`.`)] });
         const left = store.getWarnings(message.guild.id, target.id).length;
+        await logAction(message, '`🧽` Warning Removed', `Removed warning \`#${idx}\` from **${target.user.tag}** (\`${target.id}\`).`, null, C.success);
         return message.reply({ embeds: [ok('`🧽` Warning Removed', `Removed warning \`#${idx}\` from **${target.user.tag}**.\n> **Remaining:** ${left}`, C.success)] });
     }
 
@@ -350,6 +408,7 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
             .edit(message.guild.roles.everyone, { SendMessages: false }, { reason: `${message.author.tag}: ${reason}` })
             .then(() => true).catch(() => false);
         if (!done) return message.reply({ embeds: [err('Lock Failed', 'I couldn\'t update this channel\'s permissions.')] });
+        await logAction(message, '`🔒` Channel Locked', `${channel} was locked.`, reason, C.warn);
         return message.reply({ embeds: [ok('`🔒` Channel Locked', `${channel} is now locked — only staff can send messages.\n> **Reason:** ${reason}`, C.warn)] });
     }
 
@@ -364,6 +423,7 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
             .edit(message.guild.roles.everyone, { SendMessages: null }, { reason: `${message.author.tag}: unlock` })
             .then(() => true).catch(() => false);
         if (!done) return message.reply({ embeds: [err('Unlock Failed', 'I couldn\'t update this channel\'s permissions.')] });
+        await logAction(message, '`🔓` Channel Unlocked', `${channel} was unlocked.`, null, C.success);
         return message.reply({ embeds: [ok('`🔓` Channel Unlocked', `${channel} is unlocked.`, C.success)] });
     }
 
@@ -377,6 +437,7 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
         const token = (args[0] || '').toLowerCase();
         if (token === 'off' || token === '0') {
             await message.channel.setRateLimitPerUser(0).catch(() => {});
+            await logAction(message, '`🐌` Slowmode Disabled', `${message.channel} slowmode turned off.`, null, C.success);
             return message.reply({ embeds: [ok('`🐌` Slowmode Disabled', `${message.channel} slowmode turned off.`, C.success)] });
         }
 
@@ -388,6 +449,7 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
 
         const done = await message.channel.setRateLimitPerUser(seconds).then(() => true).catch(() => false);
         if (!done) return message.reply({ embeds: [err('Slowmode Failed', 'I couldn\'t update this channel\'s slowmode.')] });
+        await logAction(message, '`🐌` Slowmode Set', `${message.channel} slowmode set to **${seconds}s**.`, null, C.info);
         return message.reply({ embeds: [ok('`🐌` Slowmode Set', `${message.channel} slowmode is now **${seconds}s**.`, C.info)] });
     }
 
@@ -406,6 +468,9 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
         const newNick = args.slice(1).join(' ').trim().slice(0, 32) || null; // null resets
         const done = await target.setNickname(newNick, `${message.author.tag}: nickname change`).then(() => true).catch(() => false);
         if (!done) return message.reply({ embeds: [err('Nickname Failed', 'I couldn\'t change that member\'s nickname — check role hierarchy.')] });
+        await logAction(message, '`✏️` Nickname Updated',
+            newNick ? `**${target.user.tag}** (\`${target.id}\`) renamed to **${newNick}**.` : `**${target.user.tag}** (\`${target.id}\`)'s nickname was reset.`,
+            null, C.success);
         return message.reply({
             embeds: [ok('`✏️` Nickname Updated',
                 newNick ? `**${target.user.tag}**'s nickname is now **${newNick}**.` : `**${target.user.tag}**'s nickname was reset.`,
@@ -414,7 +479,7 @@ function createModerationHandlers({ C, BRAND, FOOTER, store }) {
     }
 
     return {
-        clear, kick, ban, unban, timeout, warn, warnings, unwarn,
+        clear, kick, ban, unban, timeout, unmute, warn, warnings, unwarn,
         lock, unlock, slowmode, nickname,
     };
 }

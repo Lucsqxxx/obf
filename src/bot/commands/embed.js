@@ -31,10 +31,30 @@
 'use strict';
 
 const { EmbedBuilder } = require('discord.js');
-const { C, FOOTER } = require('../constants');
+const { C, BRAND, FOOTER } = require('../constants');
 // parseColor / isHttpUrl live in helpers.js so `.embed` and the giveaway
 // builder accept exactly the same color tokens and URL shapes.
-const { errorEmbed, parseColor, isHttpUrl } = require('../helpers');
+const { errorEmbed, parseColor, isHttpUrl, sendModLog } = require('../helpers');
+const config = require('../config');
+
+// Mirror a posted/edited embed to the mod-log channel (audit trail — the
+// posted embed itself doesn't say who built it). `actor` is a User (works for
+// both message.author and interaction.user, since the interactive builder's
+// submit() only hands back an interaction, not the original message).
+async function logEmbedAction(client, actor, targetChannel, action, jumpUrl) {
+    const log = new EmbedBuilder()
+        .setColor(C.info)
+        .setAuthor({ name: BRAND })
+        .setTitle('`📋` .embed Used')
+        .setDescription([
+            `> **By:** ${actor} (\`${actor.id}\`)`,
+            `> **Action:** ${action} in ${targetChannel}`,
+            jumpUrl ? `> [jump to message](${jumpUrl})` : null,
+        ].filter(Boolean).join('\n'))
+        .setFooter(FOOTER)
+        .setTimestamp();
+    await sendModLog(client, config, log);
+}
 
 // ── Interactive builder spec ─────────────────────────────────────
 // Describes the embed builder to the shared interactive-builder module so
@@ -73,9 +93,10 @@ function embedBuilderSpec() {
             }
             return null;
         },
-        async submit({ values, toggles, targetChannel }) {
+        async submit({ values, toggles, targetChannel, interaction }) {
             const embed = buildEmbedFromValues(values, toggles.timestamp);
-            await targetChannel.send({ embeds: [embed] });
+            const sent = await targetChannel.send({ embeds: [embed] });
+            await logEmbedAction(interaction.client, interaction.user, targetChannel, 'posted', sent.url);
             return `Embed posted in ${targetChannel}.`;
         },
     };
@@ -209,14 +230,16 @@ function createEmbedHandler(deps = {}) {
             }
             await existing.edit({ embeds: [embed] }).catch(() => {});
             await message.delete().catch(() => {});
+            await logEmbedAction(message.client, message.author, targetChannel, 'edited', existing.url);
             const done = new EmbedBuilder().setColor(C.success).setTitle('`✅` Embed Updated')
                 .setDescription(`Edited [message](${existing.url}) in ${targetChannel}.`).setFooter(FOOTER);
             return message.channel.send({ embeds: [done] })
                 .then(m => setTimeout(() => m.delete().catch(() => {}), 6000));
         }
 
-        await targetChannel.send({ embeds: [embed] });
+        const sent = await targetChannel.send({ embeds: [embed] });
         await message.delete().catch(() => {});
+        await logEmbedAction(message.client, message.author, targetChannel, 'posted', sent.url);
     };
 }
 

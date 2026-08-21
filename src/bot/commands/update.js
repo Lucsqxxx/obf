@@ -24,9 +24,26 @@
 'use strict';
 
 const { EmbedBuilder } = require('discord.js');
-const { C, FOOTER } = require('../constants');
-const { errorEmbed } = require('../helpers');
+const { C, BRAND, FOOTER } = require('../constants');
+const { errorEmbed, sendModLog } = require('../helpers');
 const config = require('../config');
+
+// Mirror a posted announcement to the mod-log channel. `actor` is a User
+// (message.author or interaction.user, depending on which path posted it).
+async function logUpdateAction(client, actor, targetChannel, version) {
+    const log = new EmbedBuilder()
+        .setColor(C.info)
+        .setAuthor({ name: BRAND })
+        .setTitle('`📣` .update Used')
+        .setDescription([
+            `> **By:** ${actor} (\`${actor.id}\`)`,
+            `> **Version:** ${version}`,
+            `> **In:** ${targetChannel}`,
+        ].join('\n'))
+        .setFooter(FOOTER)
+        .setTimestamp();
+    await sendModLog(client, config, log);
+}
 
 // Discord embed description hard limit is 4096; the changelog goes inside a
 // fenced block so leave generous headroom for the fences + version lines.
@@ -79,7 +96,7 @@ function updateBuilderSpec() {
             if (v.body && v.body.length > MAX_BODY) return `Changelog too long (${v.body.length}/${MAX_BODY}).`;
             return null;
         },
-        async submit({ values, toggles, targetChannel }) {
+        async submit({ values, toggles, targetChannel, interaction }) {
             const embed = buildUpdateEmbed({ version: values.version, body: (values.body || '').trim() });
             const pingRole = (toggles.ping && config.supportRoleId) ? config.supportRoleId : null;
             await targetChannel.send({
@@ -87,6 +104,7 @@ function updateBuilderSpec() {
                 embeds: [embed],
                 allowedMentions: pingRole ? { roles: [pingRole] } : { parse: [] },
             });
+            await logUpdateAction(interaction.client, interaction.user, targetChannel, values.version);
             return `Update **${values.version}** announced in ${targetChannel}.`;
         },
     };
@@ -156,6 +174,7 @@ function createUpdateHandler(deps = {}) {
             embeds: [embed],
             allowedMentions: pingRole ? { roles: [pingRole] } : { parse: [] },
         });
+        await logUpdateAction(message.client, message.author, targetChannel, version);
 
         // Remove the command message so only the announcement remains (best-effort).
         await message.delete().catch(() => {});

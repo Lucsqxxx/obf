@@ -441,20 +441,28 @@ function createGiveawayHandlers({ C, BRAND, FOOTER, store, client, config, hasSt
         if (t) { clearTimeout(t); timers.delete(messageId); }
     }
 
-    // Called once on client ready: re-arm every unfinished giveaway and prune
-    // finished ones older than a day so state.json doesn't grow unbounded.
-    function rehydrate() {
+    // Drop ended giveaways older than a day so state.json doesn't grow
+    // unbounded. Only touches already-ended records — never active timers —
+    // so it's safe to call repeatedly (both at boot and on a periodic
+    // interval; previously this only ran once at boot inside rehydrate(),
+    // so a long-running process without a restart never pruned at all).
+    function pruneEndedGiveaways() {
         const DAY = 86_400_000;
         for (const g of store.listGiveaways()) {
-            if (g.ended) {
-                if (nowMs() - g.endsAt > DAY) store.deleteGiveaway(g.messageId);
-                continue;
-            }
-            arm(g);
+            if (g.ended && nowMs() - g.endsAt > DAY) store.deleteGiveaway(g.messageId);
         }
     }
 
-    return { giveaway, handleInteraction, rehydrate };
+    // Called once on client ready: re-arm every unfinished giveaway and prune
+    // finished ones older than a day so state.json doesn't grow unbounded.
+    function rehydrate() {
+        for (const g of store.listGiveaways()) {
+            if (!g.ended) arm(g);
+        }
+        pruneEndedGiveaways();
+    }
+
+    return { giveaway, handleInteraction, rehydrate, pruneEndedGiveaways };
 }
 
 // ── time helpers (Date.now is fine in the live bot) ──────────────
