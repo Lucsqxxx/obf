@@ -13,7 +13,6 @@
 
 const { Client, GatewayIntentBits } = require('discord.js');
 
-const LuaTransformer     = require('../obfuscator/transformer');
 const ObfuscatorEngine   = require('../obfuscator/engine');
 const LuaSyntaxValidator = require('../obfuscator/validator');
 const LuaBeautifier      = require('../obfuscator/beautifier');
@@ -48,7 +47,6 @@ const createSayHandler        = require('./commands/say');
 
 // ── Services ─────────────────────────────────────────────────────
 const client      = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers] });
-const transformer = new LuaTransformer();
 const engine      = new ObfuscatorEngine();
 const validator   = new LuaSyntaxValidator();
 const beautifier  = new LuaBeautifier();
@@ -70,8 +68,11 @@ function setCooldown(userId) {
 
 // ── Command wiring ───────────────────────────────────────────────
 // Dependency bundle for the .secure factory (keeps its original shape).
+// .obfuscate/.secure run each job in an isolated worker thread (see
+// transformAsync.js) rather than calling a shared Transformer instance
+// directly, so a large or slow job can never block the bot's event loop.
 const secureDeps = {
-    transformer, validator, store, usageStats,
+    validator, store, usageStats,
     C, BRAND, FOOTER, COOLDOWN_MS,
     formatBytes, bar, protectionLevel,
     fetchSource, checkCooldown, setCooldown,
@@ -87,7 +88,7 @@ const giveaways  = createGiveawayHandlers({ C, BRAND, FOOTER, store, client, con
 const applications = createApplicationHandlers({ C, BRAND, FOOTER, config, store, client, hasStaffAccess, errorEmbed, staffAccessDeniedEmbed });
 
 const commands = new Map([
-    ['obfuscate', createObfuscateHandler({ transformer, validator, store, usageStats, checkCooldown, setCooldown })],
+    ['obfuscate', createObfuscateHandler({ validator, store, usageStats, checkCooldown, setCooldown })],
     ['encrypt',   createEncryptHandler({ engine, store, usageStats })],
     ['beautify',  createBeautifyHandler({ beautifier, nativetools })],
     ['minify',    createMinifyHandler({ nativetools, minifier })],

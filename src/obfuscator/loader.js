@@ -68,7 +68,16 @@ function b64enc(bytes, alpha) {
  * payloadHash }.
  */
 function encode(script) {
-    const bytes = Array.from(Buffer.from(script, 'utf8'));
+    // `Buffer.from` already returns a Uint8Array subclass — index/length work
+    // identically to a plain Array, so read it directly instead of boxing every
+    // byte into a JS Number via Array.from(). For a large obfuscated payload
+    // (this runs on the FINAL wrapped script, often several MB after the other
+    // passes) that boxing step and the resulting non-typed Array were a real,
+    // avoidable cost: profiled as the dominant remaining hotspot on a 2.6MB
+    // input after fixing transformer._applyEdits. Uint8Array below is a much
+    // tighter fit (1 byte/element vs. a boxed double + Array overhead) and is
+    // what every byte-level loop here actually needs.
+    const bytes = Buffer.from(script, 'utf8');
     // Per-build djb2 seed: kills the static `5381` fingerprint the integrity
     // bomb used to emit verbatim. Threaded into both the hash and its emitted
     // Lua checker (build → payloadHashGuard) so the two stay exact inverses.
@@ -85,7 +94,7 @@ function encode(script) {
 
     // Layer A — outer LCG keystream XOR.
     const xorKey = randInt(0x100000, 0x7FFFFF);
-    const layerA = new Array(bytes.length);
+    const layerA = new Uint8Array(bytes.length);
     let xk = xorKey;
     for (let i = 0; i < bytes.length; i++) {
         xk = lcgNext(xk);
@@ -100,9 +109,11 @@ function encode(script) {
     const real = []; // { data, idx }
     for (let idx = 0; idx * chunkSize < layerA.length; idx++) {
         const start = idx * chunkSize;
-        const slice = layerA.slice(start, start + chunkSize);
+        // subarray() is a zero-copy VIEW (unlike slice(), which copies) — the
+        // loop below only reads from it, so a copy was pure overhead.
+        const slice = layerA.subarray(start, start + chunkSize);
         let st = (globalSeed ^ idx) >>> 0;
-        const enc = new Array(slice.length);
+        const enc = new Uint8Array(slice.length);
         for (let j = 0; j < slice.length; j++) {
             st = xs32(st);
             enc[j] = slice[j] ^ (st & 0xFF);

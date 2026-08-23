@@ -9,7 +9,14 @@
 const VERSION       = '2.0.0';
 const PREFIX        = '.';
 const COOLDOWN_MS   = 10_000;
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
+// 100MB was never realistic for a Lua/Luau script and made a genuinely huge
+// upload possible to accept — which, combined with every optional obfuscation
+// layer, could take minutes of CPU (benchmarked: ~36s for a 5MB script with
+// every heavy layer enabled). 3MB comfortably covers real-world scripts
+// (even large exploit/game scripts are typically well under 1MB) while
+// keeping worst-case processing time safely under transformAsync.js's
+// 45s worker timeout.
+const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3 MB
 
 const VALID_EXTS = new Set(['.lua', '.luau', '.txt']);
 

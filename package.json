@@ -23,7 +23,8 @@
     "test:fuzz": "node test/fuzz.js",
     "test:vm": "node test/vm.js",
     "test:luau": "node test/luau.js",
-    "test:all": "node test/run.js && node test/validator.js && node test/lexer.js && node test/beautifier.js && node test/minifier.js && node test/bot.js && node test/idguard.js && node test/nativetools.js && node test/antitamper.js && node test/roblox.js && node test/luau-real.js && node test/check.js && node test/stress.js && node test/fuzz.js && node test/vm.js && node test/luau.js"
+    "test:transform-async": "node test/transform-async.js",
+    "test:all": "node test/run.js && node test/validator.js && node test/lexer.js && node test/beautifier.js && node test/minifier.js && node test/bot.js && node test/idguard.js && node test/nativetools.js && node test/antitamper.js && node test/roblox.js && node test/luau-real.js && node test/check.js && node test/stress.js && node test/fuzz.js && node test/vm.js && node test/luau.js && node test/transform-async.js"
   },
   "engines": {
     "node": ">=18"

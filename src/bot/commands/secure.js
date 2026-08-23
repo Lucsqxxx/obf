@@ -10,6 +10,10 @@ const { parseLayerFlags } = require('../helpers');
 const { buildSecureLoader } = require('../idguard');
 const { uploadToRubis } = require('../rubis');
 const { uploadToPastefy } = require('../pastefy');
+const { runTransform } = require('../../obfuscator/transformAsync');
+
+// Same threshold obfuscate.js uses for its "this may take a bit" heads-up.
+const LARGE_FILE_HEADS_UP_BYTES = 150_000;
 
 /**
  * Factory — call once at startup with shared bot dependencies.
@@ -33,7 +37,7 @@ const { uploadToPastefy } = require('../pastefy');
  */
 function createSecureHandler(deps) {
     const {
-        transformer, validator, store, usageStats,
+        validator, store, usageStats,
         C, BRAND, FOOTER, COOLDOWN_MS,
         formatBytes, bar, protectionLevel,
         fetchSource, checkCooldown, setCooldown,
@@ -96,7 +100,11 @@ function createSecureHandler(deps) {
         setCooldown(userId);
 
         const statusMsg = await message.reply({
-            embeds: [pendingEmbed('⏳ Securing your script — generating ID, obfuscating, and uploading...')],
+            embeds: [pendingEmbed(
+                source.length > LARGE_FILE_HEADS_UP_BYTES
+                    ? `⏳ Securing your script (${formatBytes(source.length)} — this may take a bit)...`
+                    : '⏳ Securing your script — generating ID, obfuscating, and uploading...'
+            )],
         });
 
         try {
@@ -118,7 +126,7 @@ function createSecureHandler(deps) {
             //    the decryption key — there is no boolean check to strip; a wrong
             //    or missing script_id decrypts to garbage that won't loadstring.
             const t0 = Date.now();
-            const obfuscated = transformer.transform(source, {
+            const { output: obfuscated, stats } = await runTransform(source, {
                 renameVariables: true,
                 addJunkCode:     true,
                 encodeNumbers:   true,
@@ -127,7 +135,6 @@ function createSecureHandler(deps) {
                 watermark:       false,
                 ...layers,
             });
-            const stats   = transformer.getStats();
             // The payload the user actually loads: obfuscated script, encrypted
             // under the script_id (+HWID). This is what gets hosted / attached.
             const secured = buildSecureLoader(scriptId, hwid, obfuscated);
@@ -224,9 +231,15 @@ function createSecureHandler(deps) {
             }
 
         } catch (err) {
-            console.error('[UmbraX] .secure error:', err);
+            const timedOut = /timed out/i.test(err.message || '');
+            if (!timedOut) console.error('[UmbraX] .secure error:', err);
             await statusMsg.edit({
-                embeds: [errorEmbed('Secure Failed', `Something went wrong during obfuscation.\n\n\`${err.message}\``)],
+                embeds: [errorEmbed(
+                    timedOut ? 'Obfuscation Timed Out' : 'Secure Failed',
+                    timedOut
+                        ? 'This script took too long to process. Try a smaller file or fewer `--` layer flags.'
+                        : `Something went wrong during obfuscation.\n\n\`${err.message}\``,
+                )],
             });
         }
     };

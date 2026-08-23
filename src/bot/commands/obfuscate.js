@@ -11,13 +11,19 @@ const { C, BRAND, FOOTER, COOLDOWN_MS } = require('../constants');
 const {
     parseLayerFlags, formatBytes, bar, protectionLevel, fetchSource, errorEmbed,
 } = require('../helpers');
+const { runTransform } = require('../../obfuscator/transformAsync');
+
+// Above this input size, tell the user up front that it'll take a moment —
+// runTransform() itself stays non-blocking regardless (it's off-thread), but
+// a silent multi-second wait with no explanation reads as "the bot is stuck".
+const LARGE_FILE_HEADS_UP_BYTES = 150_000;
 
 /**
  * @param {{ transformer, validator, store, usageStats,
  *           checkCooldown: (id)=>{remaining:number}, setCooldown: (id)=>void }} deps
  */
 function createObfuscateHandler(deps) {
-    const { transformer, validator, store, usageStats, checkCooldown, setCooldown } = deps;
+    const { validator, store, usageStats, checkCooldown, setCooldown } = deps;
 
     return async function handleObfuscate(message, args) {
         const { layers, args: cleanArgs } = parseLayerFlags(args);
@@ -42,7 +48,11 @@ function createObfuscateHandler(deps) {
         }
 
         const statusMsg = await message.reply({
-            embeds: [new EmbedBuilder().setColor(C.main).setDescription('⏳ Obfuscating your script...')],
+            embeds: [new EmbedBuilder().setColor(C.main).setDescription(
+                source.length > LARGE_FILE_HEADS_UP_BYTES
+                    ? `⏳ Obfuscating your script... (${formatBytes(source.length)} — this may take a bit)`
+                    : '⏳ Obfuscating your script...'
+            )],
         });
 
         const check = validator.validate(source);
@@ -57,7 +67,7 @@ function createObfuscateHandler(deps) {
         const t0 = Date.now();
         let obfuscated, stats;
         try {
-            obfuscated = transformer.transform(source, {
+            ({ output: obfuscated, stats } = await runTransform(source, {
                 renameVariables: true,
                 addJunkCode:     true,
                 encodeNumbers:   true,
@@ -67,12 +77,19 @@ function createObfuscateHandler(deps) {
                 // fingerprint for anyone scanning for this tool's output.
                 watermark:       false,
                 ...layers,
-            });
-            stats = transformer.getStats();
+            }));
         } catch (err) {
             usageStats.errors++;
-            console.error('[UmbraX] transform error:', err);
-            return statusMsg.edit({ embeds: [errorEmbed('Obfuscation Failed', `\`${err.message}\``)] });
+            const timedOut = /timed out/i.test(err.message || '');
+            if (!timedOut) console.error('[UmbraX] transform error:', err);
+            return statusMsg.edit({
+                embeds: [errorEmbed(
+                    timedOut ? 'Obfuscation Timed Out' : 'Obfuscation Failed',
+                    timedOut
+                        ? 'This script took too long to process. Try a smaller file or fewer `--` layer flags.'
+                        : `\`${err.message}\``,
+                )],
+            });
         }
         const elapsed = Date.now() - t0;
 
