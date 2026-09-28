@@ -15,6 +15,15 @@ const KEYWORDS = new Set([
     'continue', 'export', 'type', 'typeof',
 ]);
 
+// Multi-char punctuation/operators, keyed by length. Module-level constants —
+// _readPunct() used to build these Sets fresh on EVERY call (i.e. once per
+// punctuation token in the source), which for a large file with tens of
+// thousands of punct tokens meant tens of thousands of throwaway Set
+// allocations doing nothing but repeating the same lookup table.
+const PUNCT_THREE = new Set(['...', '..=']);
+const PUNCT_TWO = new Set(['==', '~=', '<=', '>=', '..', '::', '//',
+    '+=', '-=', '*=', '/=', '%=', '^=']);
+
 // Token types:
 //   'name'      — identifier (not a keyword)
 //   'keyword'   — reserved word
@@ -210,16 +219,25 @@ class Lexer {
 
     _readPunct(start, line) {
         const src = this.src;
-        // Longest-match multi-char operators first.
-        const three = src.substr(start, 3);
-        const two = src.substr(start, 2);
-        const THREE = new Set(['...']);
-        const TWO = new Set(['==', '~=', '<=', '>=', '..', '::', '//',
-            '+=', '-=', '*=', '/=', '%=', '^=', '..=']);
-        if (THREE.has(three) || three === '..=') { this.pos += 3; return { type: 'punct', value: three, start, end: this.pos, line }; }
-        if (TWO.has(two)) { this.pos += 2; return { type: 'punct', value: two, start, end: this.pos, line }; }
+        const c1 = src[start];
+        const c2 = src[start + 1];
+        // Every multi-char punct token starts with a character that also has
+        // a 2-char (or, for `.`, a 3-char) form, so only bother building a
+        // substring at all when there IS a next character — this skips the
+        // allocation entirely for the single-char case, which is by far the
+        // most common punct token in real code ((), commas, dots-as-index, =).
+        if (c2 !== undefined) {
+            const two = c1 + c2;
+            // Both 3-char tokens ('...' and '..=') start with '..', so this
+            // narrows to exactly the cases worth building a 3rd char for.
+            if (two === '..') {
+                const three = two + (src[start + 2] || '');
+                if (PUNCT_THREE.has(three)) { this.pos += 3; return { type: 'punct', value: three, start, end: this.pos, line }; }
+            }
+            if (PUNCT_TWO.has(two)) { this.pos += 2; return { type: 'punct', value: two, start, end: this.pos, line }; }
+        }
         this.pos += 1;
-        return { type: 'punct', value: src[start], start, end: this.pos, line };
+        return { type: 'punct', value: c1, start, end: this.pos, line };
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
