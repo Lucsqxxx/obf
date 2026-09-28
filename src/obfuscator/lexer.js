@@ -202,16 +202,16 @@ class Lexer {
         const len = src.length;
         if (src[this.pos] === '0' && (src[this.pos + 1] === 'x' || src[this.pos + 1] === 'X')) {
             this.pos += 2;
-            while (this.pos < len && /[0-9a-fA-F_]/.test(src[this.pos])) this.pos++;
+            while (this.pos < len && this._isHexDigit(src[this.pos])) this.pos++;
         } else if (src[this.pos] === '0' && (src[this.pos + 1] === 'b' || src[this.pos + 1] === 'B')) {
             this.pos += 2;
-            while (this.pos < len && /[01_]/.test(src[this.pos])) this.pos++;
+            while (this.pos < len && this._isBinDigit(src[this.pos])) this.pos++;
         } else {
-            while (this.pos < len && /[0-9_.]/.test(src[this.pos])) this.pos++;
+            while (this.pos < len && this._isDecBody(src[this.pos])) this.pos++;
             if (this.pos < len && (src[this.pos] === 'e' || src[this.pos] === 'E')) {
                 this.pos++;
                 if (src[this.pos] === '+' || src[this.pos] === '-') this.pos++;
-                while (this.pos < len && /[0-9]/.test(src[this.pos])) this.pos++;
+                while (this.pos < len && this._isDigit(src[this.pos])) this.pos++;
             }
         }
         return { type: 'number', value: src.substring(start, this.pos), start, end: this.pos, line };
@@ -252,6 +252,9 @@ class Lexer {
     }
 
     _isDigit(c) { return c >= '0' && c <= '9'; }
+    _isHexDigit(c) { return this._isDigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') || c === '_'; }
+    _isBinDigit(c) { return c === '0' || c === '1' || c === '_'; }
+    _isDecBody(c) { return this._isDigit(c) || c === '_' || c === '.'; }
     _isNameStart(c) { return c === '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
     _isNameChar(c) { return this._isNameStart(c) || this._isDigit(c); }
 }
