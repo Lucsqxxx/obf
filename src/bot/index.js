@@ -214,4 +214,39 @@ function gracefulExit() {
 process.on('SIGINT', gracefulExit);
 process.on('SIGTERM', gracefulExit);
 
+// ── Crash resilience ─────────────────────────────────────────────
+// Every message/interaction handler above already has its own try/catch, but
+// that only covers code reachable from THIS file. Anything async elsewhere
+// (a giveaway timer's setTimeout callback, a ticket transcript fetch, an
+// upload/pastefy request, a store write) can still throw or reject outside
+// any of those catches — and by default Node treats an unhandled rejection as
+// fatal (crashing the whole process, silently, with no log if stdout isn't
+// being captured) and an uncaught exception is always fatal. A single bad
+// promise anywhere in the codebase taking down every guild's bot instance is
+// a worse outcome than logging it and staying up. These are last-resort nets,
+// not a substitute for the specific try/catches already in place.
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[UmbraX] Unhandled promise rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+    // An uncaught exception means something is in an undefined state — Node's
+    // own docs recommend NOT trying to keep running after one, since it may
+    // have left internal state corrupted. Log everything we can, flush
+    // pending store writes, then exit — let the process supervisor (pm2,
+    // systemd, Docker's restart policy, etc.) bring it back up clean.
+    console.error('[UmbraX] Uncaught exception — restarting:', err);
+    try { store.flushNow(); } catch {}
+    process.exit(1);
+});
+
+// discord.js-level errors: WebSocket errors and shard disconnects don't throw
+// into normal JS control flow, so they need their own listeners or they're
+// silently swallowed.
+client.on('error', (err) => {
+    console.error('[UmbraX] Discord client error:', err);
+});
+client.on('shardError', (err) => {
+    console.error('[UmbraX] Shard connection error:', err);
+});
+
 client.login(config.token);

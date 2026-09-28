@@ -80,14 +80,16 @@ function createObfuscateHandler(deps) {
             }));
         } catch (err) {
             usageStats.errors++;
-            const timedOut = /timed out/i.test(err.message || '');
-            if (!timedOut) console.error('[UmbraX] transform error:', err);
+            const message = err.message || '';
+            const timedOut = /timed out/i.test(message);
+            const busy = /server is busy/i.test(message);
+            if (!timedOut && !busy) console.error('[UmbraX] transform error:', err);
             return statusMsg.edit({
                 embeds: [errorEmbed(
-                    timedOut ? 'Obfuscation Timed Out' : 'Obfuscation Failed',
-                    timedOut
-                        ? 'This script took too long to process. Try a smaller file or fewer `--` layer flags.'
-                        : `\`${err.message}\``,
+                    busy ? 'Server Busy' : timedOut ? 'Obfuscation Timed Out' : 'Obfuscation Failed',
+                    busy ? message
+                        : timedOut ? 'This script took too long to process. Try a smaller file or fewer `--` layer flags.'
+                        : `\`${message}\``,
                 )],
             });
         }

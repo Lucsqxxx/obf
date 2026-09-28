@@ -185,11 +185,11 @@ function createSecureHandler(deps) {
                 if (pastefy) hostLines.push(`**Pastefy** — [view](${pastefy.viewUrl}) · \`\`getgenv().script_id = "${scriptId}"\nloadstring(game:HttpGet("${pastefy.rawUrl}"))()\`\``);
 
                 const embed = new EmbedBuilder()
-                    .setColor(C.cyan)
+                    .setColor(level.color)
                     .setAuthor({ name: BRAND })
-                    .setTitle('`🔐` Script Secured & Hosted')
+                    .setTitle(`${level.emoji} Script Secured & Hosted`)
                     .setDescription(
-                        `\`${formatBytes(stats.bytesOriginal)}\` → \`${formatBytes(stats.bytesOutput)}\` • ID-locked.\n\n` +
+                        `\`${formatBytes(stats.bytesOriginal)}\` → \`${formatBytes(stats.bytesOutput)}\` • ID-locked • \`${elapsed}ms\`.\n\n` +
                         `Tap to copy the loader:\n\`\`${loader}\`\``,
                     )
                     .addFields(
@@ -210,7 +210,7 @@ function createSecureHandler(deps) {
                     .setAuthor({ name: BRAND })
                     .setTitle('`🔐` Script Secured — Hosting Unavailable')
                     .setDescription(
-                        `\`${formatBytes(stats.bytesOriginal)}\` → \`${formatBytes(stats.bytesOutput)}\` • ID-locked & obfuscated, but the Rubis host was ` +
+                        `\`${formatBytes(stats.bytesOriginal)}\` → \`${formatBytes(stats.bytesOutput)}\` • ID-locked & obfuscated (\`${elapsed}ms\`), but the Rubis host was ` +
                         (isTimeout ? 'unreachable (timeout)' : 'unavailable') +
                         '. The obfuscated script is attached — host it yourself.'
                     )
@@ -231,14 +231,16 @@ function createSecureHandler(deps) {
             }
 
         } catch (err) {
-            const timedOut = /timed out/i.test(err.message || '');
-            if (!timedOut) console.error('[UmbraX] .secure error:', err);
+            const message = err.message || '';
+            const timedOut = /timed out/i.test(message);
+            const busy = /server is busy/i.test(message);
+            if (!timedOut && !busy) console.error('[UmbraX] .secure error:', err);
             await statusMsg.edit({
                 embeds: [errorEmbed(
-                    timedOut ? 'Obfuscation Timed Out' : 'Secure Failed',
-                    timedOut
-                        ? 'This script took too long to process. Try a smaller file or fewer `--` layer flags.'
-                        : `Something went wrong during obfuscation.\n\n\`${err.message}\``,
+                    busy ? 'Server Busy' : timedOut ? 'Obfuscation Timed Out' : 'Secure Failed',
+                    busy ? message
+                        : timedOut ? 'This script took too long to process. Try a smaller file or fewer `--` layer flags.'
+                        : `Something went wrong during obfuscation.\n\n\`${message}\``,
                 )],
             });
         }

@@ -21,7 +21,7 @@
 // ═══════════════════════════════════════════════════════════════
 'use strict';
 
-const { runTransform } = require('../src/obfuscator/transformAsync');
+const { runTransform, getQueueStats, MAX_CONCURRENT, MAX_QUEUE_DEPTH } = require('../src/obfuscator/transformAsync');
 const Transformer = require('../src/obfuscator/transformer');
 
 let pass = 0, fail = 0;
@@ -106,6 +106,67 @@ const OPTS = { renameVariables: true, addJunkCode: true, encodeNumbers: true, mi
         ok('concurrent job A matches its own direct transform', ra.output === directA);
         ok('concurrent job B matches its own direct transform', rb.output === directB);
         ok('concurrent jobs did not cross-contaminate', ra.output !== rb.output);
+    }
+
+    // ── 6. Concurrency cap: never more than MAX_CONCURRENT jobs running ──
+    {
+        ok('MAX_CONCURRENT is a sane positive integer', Number.isInteger(MAX_CONCURRENT) && MAX_CONCURRENT >= 1 && MAX_CONCURRENT <= 8,
+            `MAX_CONCURRENT=${MAX_CONCURRENT}`);
+
+        // A slow-ish job (enough layers to take tens of ms) fired MAX_CONCURRENT*3
+        // times at once. Sample getQueueStats() while they're all in flight and
+        // assert `active` never exceeds the cap, even though far more jobs than
+        // the cap were requested simultaneously.
+        const lines = [];
+        for (let i = 0; i < 800; i++) lines.push(`local v${i}=${i} print("x",v${i})`);
+        const source = lines.join('\n');
+        const opts = { renameVariables: true, addJunkCode: true, encodeNumbers: true, deepNumbers: true };
+
+        let maxObservedActive = 0;
+        const sampler = setInterval(() => {
+            maxObservedActive = Math.max(maxObservedActive, getQueueStats().active);
+        }, 2);
+
+        const jobs = Array.from({ length: MAX_CONCURRENT * 3 }, () => runTransform(source, opts));
+        await Promise.all(jobs);
+        clearInterval(sampler);
+
+        ok(`active concurrency never exceeded MAX_CONCURRENT (${MAX_CONCURRENT}) under ${MAX_CONCURRENT * 3} simultaneous jobs`,
+            maxObservedActive <= MAX_CONCURRENT, `observed peak active=${maxObservedActive}`);
+        ok('queue drains back to idle after all jobs settle', getQueueStats().active === 0 && getQueueStats().queued === 0,
+            JSON.stringify(getQueueStats()));
+    }
+
+    // ── 7. Queue overflow: beyond MAX_QUEUE_DEPTH waiting jobs, reject fast ──
+    {
+        // Occupy every concurrency slot with a job that won't resolve until we
+        // let it (an artificially tiny timeout so it rejects promptly and
+        // frees the slot once we're done probing overflow behavior).
+        const busySource = 'local x = 1 print(x)';
+        const holders = Array.from({ length: MAX_CONCURRENT }, () =>
+            runTransform(busySource, { renameVariables: true }, { timeoutMs: 500 }).catch(() => {}));
+
+        // Give the holders a tick to actually start (occupy their slots)
+        // before flooding the queue.
+        await new Promise(r => setTimeout(r, 5));
+        ok('all concurrency slots occupied by the holder jobs', getQueueStats().active === MAX_CONCURRENT,
+            JSON.stringify(getQueueStats()));
+
+        // Fill the queue past its cap; the excess should reject immediately
+        // with a "busy" error rather than hang around waiting for a slot.
+        const overflowCount = MAX_QUEUE_DEPTH + 5;
+        const overflowResults = await Promise.allSettled(
+            Array.from({ length: overflowCount }, () => runTransform(busySource, { renameVariables: true }, { timeoutMs: 5 })),
+        );
+        const busyRejections = overflowResults.filter(r => r.status === 'rejected' && /busy/i.test(r.reason.message));
+        ok(`at least the excess-over-capacity requests were rejected as busy (queue cap ${MAX_QUEUE_DEPTH})`,
+            busyRejections.length >= overflowCount - MAX_QUEUE_DEPTH,
+            `got ${busyRejections.length} busy rejections out of ${overflowCount} requests`);
+
+        await Promise.allSettled(holders);
+        // Let any queued-but-accepted jobs from the overflow batch finish/timeout
+        // before moving on, so they don't bleed into a later test's timing.
+        await new Promise(r => setTimeout(r, 50));
     }
 
     console.log(`\n${'═'.repeat(50)}`);
